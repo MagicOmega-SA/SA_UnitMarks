@@ -141,7 +141,8 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_DrawExtras(const Syring
     const void* type = DisplayedType(obj, infantry ? Game::InfantryTypeOffset : BuildingTypeOffset);
     if (!type) return 0;
     if (infantry && !Game::IsInfantryType(type)) return 0;
-    const Mark mark = infantry ? InfantryMark(type) : BuildingMark(type);
+    const Mark mark = infantry ? InfantryMark(type) :
+        BuildingMark(type, Game::ObjectType(obj, BuildingTypeOffset));
     if (mark == Mark::None) return 0;
 
     /* Some objects can reach DrawExtras with their sprite hidden. Keep the

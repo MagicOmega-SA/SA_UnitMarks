@@ -67,6 +67,6 @@ inline bool IsInfantryType(const void* type)
 enum class Mark { None, Speech, Alert, Danger };
 
 Mark VehicleMark(const void* unit, const void* displayedType, const void* actualType);
-Mark BuildingMark(const void* type);
+Mark BuildingMark(const void* displayedType, const void* actualType);
 Mark InfantryMark(const void* type);
 void LoadHeroRule(const void* type, void* ini);

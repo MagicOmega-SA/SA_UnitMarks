@@ -99,6 +99,9 @@ Mark VehicleMark(const void* unit, const void* displayedType, const void* actual
         "SCAV", "WORMQ", "AKULA", "BSUB", "MWF", "CNTR", "BASIL", "ZEP",
     };
 
+    // The decoy keeps its marker while using the real MCV's appearance.
+    if (actualType && lstrcmpiA(Game::TypeId(actualType), "XPCV") == 0)
+        return Mark::Speech;
     const char* id = Game::TypeId(displayedType);
     if (displayedType == actualType && Matches(id, heroCarriers) && HasHeroPassenger(unit))
         return Mark::Danger;
@@ -108,12 +111,25 @@ Mark VehicleMark(const void* unit, const void* displayedType, const void* actual
     return Mark::None;
 }
 
-Mark BuildingMark(const void* type)
+Mark BuildingMark(const void* displayedType, const void* actualType)
 {
     static const char* const mines[] = { "NATRAP", "YAVNMM", "GACRYO" };
-    const char* id = Game::TypeId(type);
+    static const char* const decoys[] = { "YATXCH", "YACXST", "YAPPXT" };
+    static const char* const techCenters[] = {
+        "GATECH", "NATECHR", "NATECHC", "NATEK", "YATECH", "FACYBR", "FACLDP", "FANANO",
+    };
+    static const char* const superweapons[] = {
+        "GACSPH", "GAWEAT", "NAIRON", "NAMISL", "NAEMPS", "NAICUR",
+        "YAGNTC", "YAPPET", "FABLST", "FAELEV", "FAHARB",
+    };
+
+    // Epsilon and Foehn add-ons are drawn as part of their host building.
+    // FABTRC is the trench itself. FABLST is the superweapon that activates it.
+    if (actualType && Matches(Game::TypeId(actualType), decoys)) return Mark::Speech;
+    const char* id = Game::TypeId(displayedType);
     if (Matches(id, mines)) return Mark::Speech;
-    if (lstrcmpiA(id, "FAMMIN") == 0) return Mark::Alert;
+    if (lstrcmpiA(id, "FAMMIN") == 0 || Matches(id, techCenters) || Matches(id, superweapons))
+        return Mark::Alert;
     if (lstrcmpiA(id, "NAFIST") == 0) return Mark::Danger;
     return Mark::None;
 }
