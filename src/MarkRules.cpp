@@ -87,34 +87,38 @@ bool HasHeroPassenger(const void* vehicle)
 }
 }
 
+bool HasSpeechMark(const void* type, bool building)
+{
+    static const char* const vehicles[] = {
+        "ARCH", "ARCH2", "ARCHW", "MGTK", "PHNT",
+        "SUB", "SUB2", "DLPH", "SQD", "SLED", "NAUT",
+        "XPCV", "YMIN", "YMON",
+    };
+    static const char* const buildings[] = {
+        "NATRAP", "YAVNMM", "GACRYO", "YATXCH", "YACXST", "YAPPXT",
+    };
+    const char* id = Game::TypeId(type);
+    return building ? Matches(id, buildings) : Matches(id, vehicles);
+}
+
 Mark VehicleMark(const void* unit, const void* displayedType, const void* actualType)
 {
     static const char* const heroCarriers[] = { "FV", "AMC", "TENGU" };
-    static const char* const speech[] = {
-        "ARCH", "ARCH2", "ARCHW", "MGTK", "PHNT",
-        "SUB", "SUB2", "DLPH", "SQD", "SLED", "NAUT",
-    };
     static const char* const alert[] = { "DRIL", "FDRON", "DTRUCK", "BGGY" };
     static const char* const danger[] = {
         "SCAV", "WORMQ", "AKULA", "BSUB", "MWF", "CNTR", "BASIL", "ZEP",
     };
 
-    // The decoy keeps its marker while using the real MCV's appearance.
-    if (actualType && lstrcmpiA(Game::TypeId(actualType), "XPCV") == 0)
-        return Mark::Speech;
     const char* id = Game::TypeId(displayedType);
     if (displayedType == actualType && Matches(id, heroCarriers) && HasHeroPassenger(unit))
         return Mark::Danger;
-    if (Matches(id, speech)) return Mark::Speech;
     if (Matches(id, alert)) return Mark::Alert;
     if (Matches(id, danger)) return Mark::Danger;
     return Mark::None;
 }
 
-Mark BuildingMark(const void* displayedType, const void* actualType)
+Mark BuildingMark(const void* type)
 {
-    static const char* const mines[] = { "NATRAP", "YAVNMM", "GACRYO" };
-    static const char* const decoys[] = { "YATXCH", "YACXST", "YAPPXT" };
     static const char* const techCenters[] = {
         "GATECH", "NATECHR", "NATECHC", "NATEK", "YATECH", "FACYBR", "FACLDP", "FANANO",
     };
@@ -125,9 +129,7 @@ Mark BuildingMark(const void* displayedType, const void* actualType)
 
     // Epsilon and Foehn add-ons are drawn as part of their host building.
     // FABTRC is the trench itself. FABLST is the superweapon that activates it.
-    if (actualType && Matches(Game::TypeId(actualType), decoys)) return Mark::Speech;
-    const char* id = Game::TypeId(displayedType);
-    if (Matches(id, mines)) return Mark::Speech;
+    const char* id = Game::TypeId(type);
     if (lstrcmpiA(id, "FAMMIN") == 0 || Matches(id, techCenters) || Matches(id, superweapons))
         return Mark::Alert;
     if (lstrcmpiA(id, "NAFIST") == 0) return Mark::Danger;

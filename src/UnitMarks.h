@@ -5,6 +5,7 @@
 
 struct Point2D { int X, Y; };
 struct RectangleStruct { int X, Y, Width, Height; };
+struct WorldPoint { int X, Y, Z; };
 
 struct SyringeRegisters
 {
@@ -26,6 +27,7 @@ struct SyringeHandshakeInfo
 
 extern "C" DWORD __cdecl UnitMarks_Draw(const SyringeRegisters* regs);
 extern "C" DWORD __cdecl UnitMarks_DrawExtras(const SyringeRegisters* regs);
+extern "C" DWORD __cdecl UnitMarks_DrawSpeechOverlay(const SyringeRegisters* regs);
 extern "C" DWORD __cdecl UnitMarks_ReadHero(const SyringeRegisters* regs);
 extern "C" HRESULT __cdecl SyringeHandshake(SyringeHandshakeInfo* info);
 
@@ -64,9 +66,10 @@ inline bool IsInfantryType(const void* type)
 }
 }
 
-enum class Mark { None, Speech, Alert, Danger };
+enum class Mark { None, Alert, Danger };
 
+bool HasSpeechMark(const void* type, bool building);
 Mark VehicleMark(const void* unit, const void* displayedType, const void* actualType);
-Mark BuildingMark(const void* displayedType, const void* actualType);
+Mark BuildingMark(const void* type);
 Mark InfantryMark(const void* type);
 void LoadHeroRule(const void* type, void* ini);

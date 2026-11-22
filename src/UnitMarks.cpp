@@ -7,6 +7,17 @@ constexpr unsigned VehicleTypeOffset = 0x6C4u;
 constexpr unsigned BuildingTypeOffset = 0x520u;
 constexpr unsigned BuildingVtable = 0x7E3EBCu;
 constexpr unsigned InLimboOffset = 0x81u;
+constexpr unsigned UnitArrayAddress = 0x8B4108u;
+constexpr unsigned BuildingArrayAddress = 0xA8EB40u;
+
+struct ObjectArray
+{
+    const void* vtable;
+    const void* const* items;
+    int capacity;
+    unsigned flags;
+    int count;
+};
 
 struct SyHookDecl
 {
@@ -18,6 +29,8 @@ struct SyHookDecl
 
 static_assert(sizeof(SyHookDecl) == 16, "Syringe hook records must be 16 bytes");
 static_assert(sizeof(SyringeHandshakeInfo) == 32, "Syringe handshake must be 32 bytes");
+static_assert(offsetof(ObjectArray, items) == 4 && offsetof(ObjectArray, count) == 16,
+              "Game object arrays must match DynamicVectorClass");
 static_assert(sizeof(SyringeRegisters) == 0x28 && offsetof(SyringeRegisters, esi) == 0x0C &&
               offsetof(SyringeRegisters, ebp) == 0x10 && offsetof(SyringeRegisters, esp) == 0x14 &&
               offsetof(SyringeRegisters, ebx) == 0x18 && offsetof(SyringeRegisters, ecx) == 0x20,
@@ -29,6 +42,8 @@ static SyHookDecl g_hooks[] __attribute__((section(".syhks00"), used, aligned(16
     { 0x73D408u, 5u, "UnitMarks_Draw", 0u },
     /* TechnoClass::DrawExtras, just before the native talk bubble. */
     { 0x6F5E8Du, 6u, "UnitMarks_DrawExtras", 0u },
+    /* After the tactical and shroud passes, before the composite surface is presented. */
+    { 0x4F4562u, 6u, "UnitMarks_DrawSpeechOverlay", 0u },
     /* InfantryTypeClass::LoadFromINI entry. */
     { 0x5240A0u, 6u, "UnitMarks_ReadHero", 0u },
 };
@@ -40,6 +55,9 @@ using LoadShapeFn = void* (__fastcall *)(const char*, bool);
 using ResolveShapeFn = void* (__attribute__((thiscall)) *)(void*);
 using CreatePaletteFn = void (__fastcall *)(const char*, void**, void**);
 using FreeGameMemoryFn = void (__cdecl *)(void*);
+using GetCoordsFn = WorldPoint* (__attribute__((thiscall)) *)(const void*, WorldPoint*);
+using ProjectFn = bool (__attribute__((thiscall)) *)(void*, const WorldPoint*, Point2D*);
+using SurfaceSizeFn = int (__attribute__((thiscall)) *)(void*);
 using DrawShapeFn = void (__fastcall *)(void*, void*, void*, int,
     const Point2D*, const RectangleStruct*, int, int, int, int, int, int,
     void*, int, int, int);
@@ -85,29 +103,85 @@ void* MarkPalette()
     return convert;
 }
 
+void DrawMarkerSprite(void* surface, void* palette, void* shape, int frame,
+                      const Point2D* location, const RectangleStruct* bounds)
+{
+    // Center the sprite on its canvas, with no depth test against the world.
+    ((DrawShapeFn)ENGINE_ADDRESS(0x4AED70u))(surface, palette, shape, frame, location, bounds,
+        0x600, 0, 0, 0, 1000, 0, NULL, 0, 0, 0);
+}
+
 void DrawMark(Mark mark, const Point2D* location, const RectangleStruct* bounds)
 {
     if (mark == Mark::None || !location || !bounds) return;
     void* surface = *(void**)ENGINE_ADDRESS(0x887314u);
     if (!surface) return;
 
-    const bool isSpeech = mark == Mark::Speech;
-    void* shape = isSpeech ? *(void**)ENGINE_ADDRESS(0xAC1484u) :
-        ((LoadShapeFn)ENGINE_ADDRESS(0x5B40B0u))(
-            mark == Mark::Alert ? "ALERTMARK.SHP" : "DANGERMARK.SHP", false);
+    void* shape = ((LoadShapeFn)ENGINE_ADDRESS(0x5B40B0u))(
+        mark == Mark::Alert ? "ALERTMARK.SHP" : "DANGERMARK.SHP", false);
     if (!shape) return;
     shape = ((ResolveShapeFn)ENGINE_ADDRESS(0x69E580u))(shape);
     if (!shape) return;
     const short frameCount = ((const short*)shape)[3];
-    if (frameCount <= 0 || (isSpeech && frameCount < 3)) return;
-    void* palette = isSpeech ? *(void**)ENGINE_ADDRESS(0x87F6C4u) : MarkPalette();
+    if (frameCount <= 0) return;
+    void* palette = MarkPalette();
     if (!palette) return;
 
-    /* The transparent source canvas places the icon above the object. */
-    const int frame = frameCount > 2 ? 2 : 0;
-    ((DrawShapeFn)ENGINE_ADDRESS(0x4AED70u))(surface, palette, shape, frame, location, bounds,
-        0x600, 0, 0, 0, 1000, 0, NULL, 0, 0, 0);
+    DrawMarkerSprite(surface, palette, shape, frameCount > 2 ? 2 : 0, location, bounds);
 }
+
+void DrawSpeechMarkers(const ObjectArray& objects, bool building, void* tactical, void* surface,
+                       void* palette, void* shape, const RectangleStruct& view)
+{
+    if (!objects.items || objects.count <= 0 || objects.count > objects.capacity) return;
+    const RectangleStruct bounds{0, 0, view.Width, view.Height};
+    const auto project = reinterpret_cast<ProjectFn>(ENGINE_ADDRESS(0x6D2140u));
+    const unsigned typeOffset = building ? BuildingTypeOffset : VehicleTypeOffset;
+    for (int i = 0; i < objects.count; ++i)
+    {
+        const auto* object = static_cast<const unsigned char*>(objects.items[i]);
+        // InLimbo also covers objects that are not currently placed on the map.
+        if (!object || object[InLimboOffset] || !Game::IsAlive(object)) continue;
+        const void* type = Game::ObjectType(object, typeOffset);
+        if (!type || !HasSpeechMark(type, building)) continue;
+
+        auto* vtable = *reinterpret_cast<void* const* const*>(object);
+        const auto getCoords = reinterpret_cast<GetCoordsFn>(vtable[0x48u / 4u]);
+        WorldPoint world{};
+        Point2D pixel{};
+        getCoords(object, &world);
+        if (!project(tactical, &world, &pixel)) continue;
+        pixel.X -= view.X;
+        pixel.Y -= view.Y;
+        DrawMarkerSprite(surface, palette, shape, 2, &pixel, &bounds);
+    }
+}
+}
+
+extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_DrawSpeechOverlay(const SyringeRegisters*)
+{
+    if (!*static_cast<const unsigned char*>(ENGINE_ADDRESS(0xA8ED5Cu))) return 0;
+    void* tactical = *static_cast<void**>(ENGINE_ADDRESS(0x887324u));
+    void* surface = *static_cast<void**>(ENGINE_ADDRESS(0x88731Cu));
+    void* palette = *static_cast<void**>(ENGINE_ADDRESS(0x87F6C4u));
+    void* shape = *static_cast<void**>(ENGINE_ADDRESS(0xAC1484u));
+    if (!tactical || !surface || !shape || !palette) return 0;
+    shape = ((ResolveShapeFn)ENGINE_ADDRESS(0x69E580u))(shape);
+    if (!shape || static_cast<const short*>(shape)[3] < 3) return 0;
+
+    auto view = *static_cast<const RectangleStruct*>(ENGINE_ADDRESS(0x886FA0u));
+    auto* vtable = *static_cast<void***>(surface);
+    const int width = reinterpret_cast<SurfaceSizeFn>(vtable[0x7Cu / 4u])(surface);
+    const int height = reinterpret_cast<SurfaceSizeFn>(vtable[0x80u / 4u])(surface);
+    if (view.Width > width) view.Width = width;
+    if (view.Height > height) view.Height = height;
+    if (view.Width <= 0 || view.Height <= 0) return 0;
+
+    DrawSpeechMarkers(*static_cast<const ObjectArray*>(ENGINE_ADDRESS(UnitArrayAddress)),
+                      false, tactical, surface, palette, shape, view);
+    DrawSpeechMarkers(*static_cast<const ObjectArray*>(ENGINE_ADDRESS(BuildingArrayAddress)),
+                      true, tactical, surface, palette, shape, view);
+    return 0;
 }
 
 extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_Draw(const SyringeRegisters* regs)
@@ -122,6 +196,7 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_Draw(const SyringeRegis
 
     const void* actualType = Game::ObjectType(unit, VehicleTypeOffset);
     const Mark mark = VehicleMark(unit, displayedType, actualType);
+    if (mark != Mark::None && actualType && HasSpeechMark(actualType, false)) return 0;
     DrawMark(mark, reinterpret_cast<const Point2D*>(stack + 0x30u), bounds);
     return 0;
 }
@@ -141,12 +216,16 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_DrawExtras(const Syring
     const void* type = DisplayedType(obj, infantry ? Game::InfantryTypeOffset : BuildingTypeOffset);
     if (!type) return 0;
     if (infantry && !Game::IsInfantryType(type)) return 0;
-    const Mark mark = infantry ? InfantryMark(type) :
-        BuildingMark(type, Game::ObjectType(obj, BuildingTypeOffset));
+    const Mark mark = infantry ? InfantryMark(type) : BuildingMark(type);
     if (mark == Mark::None) return 0;
+    if (!infantry)
+    {
+        const void* actualType = Game::ObjectType(obj, BuildingTypeOffset);
+        if (actualType && HasSpeechMark(actualType, true)) return 0;
+    }
 
     /* Some objects can reach DrawExtras with their sprite hidden. Keep the
-     * mine/hero marker out of the cloak ripple and fully hidden states. */
+     * red markers out of the cloak ripple and fully hidden states. */
     VisualFn visual = (VisualFn)vt[0x68u / 4u];
     if (!visual || visual(obj, 0, NULL) >= 4) return 0;
     DrawMark(mark, *reinterpret_cast<const Point2D* const*>(stack + 0x9Cu),

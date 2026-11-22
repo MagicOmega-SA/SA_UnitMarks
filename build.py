@@ -30,4 +30,8 @@ subprocess.run([
     "-nostdlib", "-lkernel32", "-luser32", "-lgcc", "-s",
     "-Wl,--no-insert-timestamp", "-Wl,--entry,_DllMain@12",
 ], cwd=root, env=env, check=True)
-print(f"Built {out / 'SA_UnitMarks.dll'}")
+plugin = out / "SA_UnitMarks.dll"
+# The plugin has no logging code, so both variants use the same binary.
+quiet_plugin = out / "SA_UnitMarks_nolog.dll"
+shutil.copyfile(plugin, quiet_plugin)
+print(f"Built {plugin} and {quiet_plugin}")
