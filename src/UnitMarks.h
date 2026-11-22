@@ -29,6 +29,9 @@ extern "C" DWORD __cdecl UnitMarks_Draw(const SyringeRegisters* regs);
 extern "C" DWORD __cdecl UnitMarks_DrawExtras(const SyringeRegisters* regs);
 extern "C" DWORD __cdecl UnitMarks_DrawSpeechOverlay(const SyringeRegisters* regs);
 extern "C" DWORD __cdecl UnitMarks_ReadHero(const SyringeRegisters* regs);
+extern "C" DWORD __cdecl UnitMarks_ResetImpactMarkers(const SyringeRegisters* regs);
+extern "C" DWORD __cdecl UnitMarks_ObserveSuperweaponLaunch(const SyringeRegisters* regs);
+extern "C" DWORD __cdecl UnitMarks_ObserveSuperweaponImpact(const SyringeRegisters* regs);
 extern "C" HRESULT __cdecl SyringeHandshake(SyringeHandshakeInfo* info);
 
 #ifdef UNIT_MARKS_FIXTURE
@@ -67,6 +70,9 @@ inline bool IsInfantryType(const void* type)
 }
 
 enum class Mark { None, Alert, Danger };
+constexpr unsigned MaxImpactMarkers = 32;
+
+unsigned CollectImpactMarkers(WorldPoint (&positions)[MaxImpactMarkers]);
 
 bool HasSpeechMark(const void* type, bool building);
 Mark VehicleMark(const void* unit, const void* displayedType, const void* actualType);

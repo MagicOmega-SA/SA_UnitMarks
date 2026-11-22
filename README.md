@@ -1,6 +1,8 @@
 # SA_UnitMarks
 
-《心灵终结》3.3.6 的单位头顶标记插件。
+《心灵终结》3.3.6 的单位标记与超武落点提示插件。
+
+## 单位标记
 
 | 标记 | 单位 |
 |---|---|
@@ -13,13 +15,17 @@
 
 原生气泡显示当前视口内任意阵营的目标位置，覆盖潜行和黑幕。单位本体保留游戏原有的可见性。
 
-## 安装
+## 超武落点
 
-构建后，从 `dist/` 选用 `SA_UnitMarks.dll` 或 `SA_UnitMarks_nolog.dll`，放到 `gamemd.exe` 和 `Syringe.exe` 所在目录，从游戏客户端启动。卸载时移走 DLL。
+战术核弹、顶点暴风、闪电风暴和心灵支配确认发射后，目标格中心会显示红色骷髅。骷髅在收到打击事件后移除，未收到事件时会自动过期。该功能使用《心灵终结》3.3.6 随附的 Ares。
+
+## 下载与安装
+
+从 [GitHub Release](https://github.com/MagicOmega-SA/SA_UnitMarks/releases/latest) 下载 `SA_UnitMarks_nolog.dll`，放到 `gamemd.exe` 和 `Syringe.exe` 所在目录，再从游戏客户端启动。升级时只保留一个 `SA_UnitMarks` DLL。
 
 ## 构建
 
-使用 Python 3 和 32 位 MinGW-w64（`i686-w64-mingw32`）。将工具链的 `bin` 目录加入 `PATH`，或设为 `MOE_MINGW`，然后运行 `python build.py`。
+使用 Python 3 和 32 位 MinGW-w64（`i686-w64-mingw32`）。将工具链的 `bin` 目录加入 `PATH`，或设为 `MOE_MINGW`，然后运行 `python build.py`。常规版与无日志版均输出到 `dist/`。
 
 ## 许可证
 

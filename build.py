@@ -22,7 +22,7 @@ if target != "i686-w64-mingw32":
     sys.exit(f"Expected i686-w64-mingw32, got {target}")
 out = root / "dist"
 out.mkdir(exist_ok=True)
-sources = [root / "src" / name for name in ("UnitMarks.cpp", "MarkRules.cpp")]
+sources = [root / "src" / name for name in ("UnitMarks.cpp", "MarkRules.cpp", "ImpactMarkers.cpp")]
 subprocess.run([
     compiler, "-O2", "-Wall", "-fno-exceptions", "-fno-rtti", "-shared",
     "-fno-unwind-tables", "-fno-asynchronous-unwind-tables",
