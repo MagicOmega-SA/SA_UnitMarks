@@ -6,6 +6,7 @@ namespace
 constexpr unsigned VehicleTypeOffset = 0x6C4u;
 constexpr unsigned BuildingTypeOffset = 0x520u;
 constexpr unsigned BuildingVtable = 0x7E3EBCu;
+constexpr unsigned AircraftVtable = 0x7E22A4u;
 constexpr unsigned InLimboOffset = 0x81u;
 constexpr unsigned UnitArrayAddress = 0x8B4108u;
 constexpr unsigned BuildingArrayAddress = 0xA8EB40u;
@@ -50,6 +51,8 @@ static SyHookDecl g_hooks[] __attribute__((section(".syhks00"), used, aligned(16
     { 0x683E94u, 5u, "UnitMarks_ResetImpactMarkers", 0u },
     { 0x486840u, 5u, "UnitMarks_ObserveSuperweaponLaunch", 0u },
     { 0x65FA70u, 6u, "UnitMarks_ObserveSuperweaponImpact", 0u },
+    /* BulletClass::Detonate handles Boid Blitz, which has no radar event. */
+    { 0x4690B0u, 6u, "UnitMarks_ObserveBoidBlitzDetonation", 0u },
 };
 
 using VisibleToFn = unsigned char (__attribute__((thiscall)) *)(void*, void*);
@@ -234,9 +237,16 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_Draw(const SyringeRegis
 
     const void* actualType = Game::ObjectType(unit, VehicleTypeOffset);
     const Mark mark = VehicleMark(unit, displayedType, actualType);
-    if (mark != Mark::None && actualType && HasSpeechMark(actualType, false)) return 0;
+    if (mark == Mark::None) return 0;
+    Point2D location = *reinterpret_cast<const Point2D*>(stack + 0x30u);
+    if (actualType && HasSpeechMark(actualType, false))
+    {
+        if (mark != Mark::PassengerDanger) return 0;
+        // The Nautilus and any other speech-marked transport can draw both icons.
+        location.X += 30;
+    }
     DrawMark(mark, *static_cast<void**>(ENGINE_ADDRESS(0x887314u)),
-             reinterpret_cast<const Point2D*>(stack + 0x30u), bounds);
+             &location, bounds);
     return 0;
 }
 
@@ -248,20 +258,29 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_DrawExtras(const Syring
     if (!obj || !stack) return 0;
     void** vt = *(void***)obj;
     const bool infantry = vt == ENGINE_ADDRESS(Game::InfantryVtable);
-    if (!infantry && vt != ENGINE_ADDRESS(BuildingVtable)) return 0;
+    const bool building = vt == ENGINE_ADDRESS(BuildingVtable);
+    const bool aircraft = vt == ENGINE_ADDRESS(AircraftVtable);
+    if (!infantry && !building && !aircraft) return 0;
     const unsigned char* bytes = (const unsigned char*)obj;
     if (bytes[InLimboOffset] || !Game::IsAlive(obj)) return 0;
 
-    const void* type = DisplayedType(obj, infantry ? Game::InfantryTypeOffset : BuildingTypeOffset);
-    if (!type) return 0;
-    if (infantry && !Game::IsInfantryType(type)) return 0;
-    const Mark mark = infantry ? InfantryMark(type) : BuildingMark(type);
-    if (mark == Mark::None) return 0;
-    if (!infantry)
+    Mark mark = Mark::None;
+    if (aircraft)
     {
-        const void* actualType = Game::ObjectType(obj, BuildingTypeOffset);
-        if (actualType && HasSpeechMark(actualType, true)) return 0;
+        if (HasMarkedPassenger(obj, false)) mark = Mark::PassengerDanger;
     }
+    else
+    {
+        const void* type = DisplayedType(obj, infantry ? Game::InfantryTypeOffset : BuildingTypeOffset);
+        if (!type || (infantry && !Game::IsInfantryType(type))) return 0;
+        mark = infantry ? InfantryMark(type) : BuildingMark(obj, type);
+        if (building && mark != Mark::None)
+        {
+            const void* actualType = Game::ObjectType(obj, BuildingTypeOffset);
+            if (actualType && HasSpeechMark(actualType, true)) return 0;
+        }
+    }
+    if (mark == Mark::None) return 0;
 
     /* Some objects can reach DrawExtras with their sprite hidden. Keep the
      * red markers out of the cloak ripple and fully hidden states. */

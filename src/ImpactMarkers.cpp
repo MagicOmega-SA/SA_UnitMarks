@@ -9,8 +9,14 @@ constexpr unsigned AresDominatorRadarReturn = 0x378F8u;
 constexpr unsigned CurrentFrame = 0xA8ED84u;
 constexpr DWORD ExpirationFrames = 900;
 constexpr DWORD SuperweaponRadarEvent = 13;
+constexpr unsigned GridSize = 512;
+constexpr unsigned BulletTargetOffset = 0x10Cu;
+constexpr unsigned BulletWarheadOffset = 0x128u;
+constexpr unsigned BulletTargetCoordsOffset = 0x140u;
+constexpr unsigned CellVtable = 0x7E4EECu;
+constexpr unsigned CellMapCoordsOffset = 0x24u;
 
-enum class Weapon { None, Nuke, Tempest, Lightning, Domination };
+enum class Weapon { None, Nuke, Tempest, Lightning, Domination, BoidBlitz };
 
 struct ImpactMarker
 {
@@ -53,6 +59,7 @@ Weapon WeaponFromExtension(DWORD extension)
     if (lstrcmpiA(id, "GreatTempestSpecial") == 0) return Weapon::Tempest;
     if (lstrcmpiA(id, "LightningStormSpecial") == 0) return Weapon::Lightning;
     if (lstrcmpiA(id, "PsychicDominatorSpecial") == 0) return Weapon::Domination;
+    if (lstrcmpiA(id, "BoidBlitzSpecial") == 0) return Weapon::BoidBlitz;
     return Weapon::None;
 }
 
@@ -65,7 +72,6 @@ void RemoveExpired(DWORD frame)
 
 void AddMarker(Weapon weapon, DWORD cell, const void* square)
 {
-    constexpr unsigned GridSize = 512;
     const unsigned x = cell & 0xFFFFu;
     const unsigned y = cell >> 16;
     if (!square || x >= GridSize || y >= GridSize) return;
@@ -91,6 +97,27 @@ void AddMarker(Weapon weapon, DWORD cell, const void* square)
     const auto* bytes = static_cast<const unsigned char*>(square);
     if (*reinterpret_cast<const unsigned*>(bytes + 0x140u) & 0x100u) location.Z += 416;
     *slot = {weapon, cell, now, location};
+}
+
+bool RemoveMarker(Weapon weapon, DWORD cell)
+{
+    const DWORD now = *static_cast<const DWORD*>(ENGINE_ADDRESS(CurrentFrame));
+    RemoveExpired(now);
+    ImpactMarker* first = nullptr;
+    for (auto& marker : markers)
+        if (marker.weapon == weapon && marker.cell == cell && (!first || now - marker.frame > now - first->frame))
+            first = &marker;
+    if (!first) return false;
+    first->weapon = Weapon::None;
+    return true;
+}
+
+DWORD CellFromWorld(const WorldPoint& point)
+{
+    constexpr int CellSize = 256;
+    constexpr int MapLimit = GridSize * CellSize;
+    if (point.X < 0 || point.Y < 0 || point.X >= MapLimit || point.Y >= MapLimit) return 0xFFFFFFFFu;
+    return static_cast<DWORD>(point.X / CellSize) | static_cast<DWORD>(point.Y / CellSize) << 16;
 }
 }
 
@@ -122,14 +149,27 @@ extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_ObserveSuperweaponImpac
         returnOffset != AresDominatorRadarReturn) return 0;
 
     const Weapon weapon = WeaponFromExtension(returnOffset == AresDominatorRadarReturn ? regs->edi : regs->ebx);
-    if (weapon == Weapon::None) return 0;
-    const DWORD now = *static_cast<const DWORD*>(ENGINE_ADDRESS(CurrentFrame));
-    RemoveExpired(now);
-    ImpactMarker* first = nullptr;
-    for (auto& marker : markers)
-        if (marker.weapon == weapon && marker.cell == stack[1] && (!first || now - marker.frame > now - first->frame))
-            first = &marker;
-    if (first) first->weapon = Weapon::None;
+    if (weapon != Weapon::None) RemoveMarker(weapon, stack[1]);
+    return 0;
+}
+
+extern "C" __declspec(dllexport) DWORD __cdecl UnitMarks_ObserveBoidBlitzDetonation(const SyringeRegisters* regs)
+{
+    if (!aresImage || !regs || !regs->ecx || !regs->esp) return 0;
+    const auto* bullet = reinterpret_cast<const char*>(regs->ecx);
+    const void* warhead = Game::ObjectType(bullet, BulletWarheadOffset);
+    if (!warhead || lstrcmpiA(Game::TypeId(warhead), "BoidBlitzWH") != 0) return 0;
+
+    // Boid Blitz disables radar events. Use the shell's assigned cell even if it lands short.
+    const auto* target = static_cast<const char*>(Game::ObjectType(bullet, BulletTargetOffset));
+    const DWORD cell = target && *reinterpret_cast<const DWORD*>(target) == CellVtable
+        ? *reinterpret_cast<const DWORD*>(target + CellMapCoordsOffset)
+        : CellFromWorld(*reinterpret_cast<const WorldPoint*>(bullet + BulletTargetCoordsOffset));
+    if (!RemoveMarker(Weapon::BoidBlitz, cell))
+    {
+        const auto* stack = reinterpret_cast<const WorldPoint* const*>(regs->esp);
+        if (stack[1]) RemoveMarker(Weapon::BoidBlitz, CellFromWorld(*stack[1]));
+    }
     return 0;
 }
 

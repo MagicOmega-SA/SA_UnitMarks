@@ -9,8 +9,11 @@ constexpr unsigned PassengerCountOffset = 0x114u;
 constexpr unsigned FirstPassengerOffset = 0x118u;
 constexpr unsigned NextObjectOffset = 0x30u;
 constexpr unsigned InfantryIndexOffset = 0xDF8u;
+constexpr unsigned BuildingUpgradesOffset = 0x5ECu;
+constexpr unsigned BuildingUpgradeSlots = 3;
 constexpr unsigned HeroFlag = 1u;
 constexpr unsigned FirstInsigniaFlag = 2u;
+constexpr char CrazyIvanId[] = "IVAN";
 
 struct HeroRule
 {
@@ -64,12 +67,13 @@ bool IsInfantryHero(const void* type)
     };
     return Matches(id, baseHeroes);
 }
+}
 
-bool HasHeroPassenger(const void* vehicle)
+bool HasMarkedPassenger(const void* vehicle, bool includeHeroes)
 {
     const auto* bytes = static_cast<const char*>(vehicle);
     const int count = *reinterpret_cast<const int*>(bytes + PassengerCountOffset);
-    if (count <= 0 || count > 64) return false;
+    if (count <= 0) return false;
 
     const auto* passenger = *reinterpret_cast<const char* const*>(bytes + FirstPassengerOffset);
     for (int i = 0; i < count && passenger; ++i,
@@ -81,10 +85,11 @@ bool HasHeroPassenger(const void* vehicle)
         if (!Game::IsAlive(passenger)) continue;
         const void* type = Game::ObjectType(passenger, Game::InfantryTypeOffset);
         if (!Game::IsInfantryType(type)) continue;
-        if (lstrcmpiA(Game::TypeId(type), "TANY") == 0 || IsInfantryHero(type)) return true;
+        const char* id = Game::TypeId(type);
+        if (lstrcmpiA(id, CrazyIvanId) == 0) return true;
+        if (includeHeroes && (lstrcmpiA(id, "TANY") == 0 || IsInfantryHero(type))) return true;
     }
     return false;
-}
 }
 
 bool HasSpeechMark(const void* type, bool building)
@@ -106,30 +111,43 @@ Mark VehicleMark(const void* unit, const void* displayedType, const void* actual
     static const char* const heroCarriers[] = { "FV", "AMC", "TENGU" };
     static const char* const alert[] = { "DRIL", "FDRON", "DTRUCK", "BGGY" };
     static const char* const danger[] = {
-        "SCAV", "WORMQ", "AKULA", "BSUB", "MWF", "CNTR", "BASIL", "ZEP",
+        "SCAV", "WORMQ", "AKULA", "BSUB", "MWF", "MAD", "MADAI", "CNTR", "BASIL", "ZEP",
     };
 
     const char* id = Game::TypeId(displayedType);
-    if (displayedType == actualType && Matches(id, heroCarriers) && HasHeroPassenger(unit))
-        return Mark::Danger;
+    if (displayedType == actualType && HasMarkedPassenger(unit, Matches(id, heroCarriers)))
+        return Mark::PassengerDanger;
     if (Matches(id, alert)) return Mark::Alert;
     if (Matches(id, danger)) return Mark::Danger;
     return Mark::None;
 }
 
-Mark BuildingMark(const void* type)
+Mark BuildingMark(const void* building, const void* type)
 {
     static const char* const techCenters[] = {
-        "GATECH", "NATECHR", "NATECHC", "NATEK", "YATECH", "FACYBR", "FACLDP", "FANANO",
+        "GATECH", "NATECHR", "NATECHC", "NATEK", "YATECH",
+    };
+    static const struct { const char* type; const char* expansion; } foehnTech[] = {
+        {"FACYBR", "FACYBR_B"}, {"FACLDP", "FACLDP_B"}, {"FANANO", "FANANO_B"},
     };
     static const char* const superweapons[] = {
         "GACSPH", "GAWEAT", "NAIRON", "NAMISL", "NAEMPS", "NAICUR",
         "YAGNTC", "YAPPET", "FABLST", "FAELEV", "FAHARB",
     };
 
-    // Epsilon and Foehn add-ons are drawn as part of their host building.
     // FABTRC is the trench itself. FABLST is the superweapon that activates it.
     const char* id = Game::TypeId(type);
+    for (const auto& tech : foehnTech)
+    {
+        if (lstrcmpiA(id, tech.type) != 0) continue;
+        // An expansion is installed when its type occupies a host upgrade slot.
+        const auto* upgrades = reinterpret_cast<const void* const*>(
+            static_cast<const char*>(building) + BuildingUpgradesOffset);
+        for (unsigned i = 0; i < BuildingUpgradeSlots; ++i)
+            if (upgrades[i] && lstrcmpiA(Game::TypeId(upgrades[i]), tech.expansion) == 0)
+                return Mark::Alert;
+        return Mark::None;
+    }
     if (lstrcmpiA(id, "FAMMIN") == 0 || Matches(id, techCenters) || Matches(id, superweapons))
         return Mark::Alert;
     if (lstrcmpiA(id, "NAFIST") == 0) return Mark::Danger;
@@ -138,6 +156,7 @@ Mark BuildingMark(const void* type)
 
 Mark InfantryMark(const void* type)
 {
+    if (lstrcmpiA(Game::TypeId(type), CrazyIvanId) == 0) return Mark::Alert;
     const auto* data = static_cast<const unsigned char*>(type);
     // Both flags identify working agents. Infiltrate alone also matches decoys.
     const bool infiltrate = data[0xEBEu] != 0;
